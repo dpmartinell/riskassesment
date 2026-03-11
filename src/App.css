@@ -1,42 +1,230 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
-}
+import { useMemo } from "react";
+import { generateDummyPortfolio, generateHistoricalArchive } from "./data/generateDummyPortfolio";
+import { buildInsuranceModel } from "./models/insurance";
+import { buildCreditModel } from "./models/credit";
+import { runMonteCarlo } from "./models/montecarlo";
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
-}
+export default function App() {
+  const companies = useMemo(() => generateDummyPortfolio(), []);
+  const historicalRows = useMemo(() => generateHistoricalArchive(), []);
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
+  const firstCompany = companies[0];
+  const firstFarm = firstCompany.farms[0];
+  const firstPond = firstFarm.ponds[0];
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
-}
+  const insurance = buildInsuranceModel({
+    riskIndex: firstPond.riskIndex,
+    hotspotFraction: firstPond.hotspotFraction,
+    historicalRows,
+    expectedBiomassKg: firstPond.expectedBiomassKg,
+    salePriceUsdPerKg: firstFarm.sellingPrice,
+    yieldDragWQ: firstPond.yieldDrag,
+    capitalExposureUsd: firstPond.expectedBiomassKg * firstFarm.sellingPrice,
+    insuredAmountUsd: firstPond.expectedBiomassKg * firstFarm.sellingPrice * 0.5
+  });
 
-.card {
-  padding: 2em;
-}
+  const insuredCoverageRatio =
+    insurance.coveredValueUsd / Math.max(insurance.wqAffectedValueUsd, 1);
 
-.read-the-docs {
-  color: #888;
+  const credit = buildCreditModel({
+    riskIndex: firstPond.riskIndex,
+    yieldDrag: firstPond.yieldDrag,
+    capitalExposureUsd: firstPond.expectedBiomassKg * firstFarm.sellingPrice,
+    creditExposureUsd: firstPond.expectedBiomassKg * firstFarm.sellingPrice * 0.35,
+    insuredCoverageRatio
+  });
+
+  const mc = runMonteCarlo({
+    baseRiskIndex: firstPond.riskIndex,
+    baseHotspotFraction: firstPond.hotspotFraction,
+    baseBiomassKg: firstPond.expectedBiomassKg,
+    triggerRisk: insurance.triggerRisk,
+    triggerHotspot: insurance.triggerHotspot,
+    payoutIfTriggeredUsd: insurance.payoutIfTriggered,
+    historicalRows,
+    cycles: 1000
+  });
+
+  return (
+    <div className="app">
+      <div className="top">
+        <div>
+          <div className="h1">Shrimpl Risk Platform</div>
+          <div className="sub">
+            First integrated build with dummy portfolio, insurance, credit and Monte Carlo.
+          </div>
+        </div>
+      </div>
+
+      <div className="grid2">
+        <div className="card panel">
+          <h3>Selected portfolio element</h3>
+          <div className="muted">First generated company / farm / pond</div>
+          <div className="tableWrap" style={{ marginTop: 12 }}>
+            <table>
+              <tbody>
+                <tr>
+                  <th>Company</th>
+                  <td>{firstCompany.id}</td>
+                </tr>
+                <tr>
+                  <th>Farm</th>
+                  <td>{firstFarm.id}</td>
+                </tr>
+                <tr>
+                  <th>Country</th>
+                  <td>{firstFarm.country}</td>
+                </tr>
+                <tr>
+                  <th>System</th>
+                  <td>{firstFarm.system}</td>
+                </tr>
+                <tr>
+                  <th>Pond</th>
+                  <td>{firstPond.id}</td>
+                </tr>
+                <tr>
+                  <th>Expected biomass (kg)</th>
+                  <td>{firstPond.expectedBiomassKg.toFixed(0)}</td>
+                </tr>
+                <tr>
+                  <th>Yield drag</th>
+                  <td>{(firstPond.yieldDrag * 100).toFixed(1)}%</td>
+                </tr>
+                <tr>
+                  <th>Risk index</th>
+                  <td>{firstPond.riskIndex.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <th>Hotspot fraction</th>
+                  <td>{(firstPond.hotspotFraction * 100).toFixed(1)}%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="card panel">
+          <h3>Insurance model</h3>
+          <div className="muted">WQ-attributable insured value</div>
+          <div className="tableWrap" style={{ marginTop: 12 }}>
+            <table>
+              <tbody>
+                <tr>
+                  <th>Biomass value</th>
+                  <td>${insurance.biomassValueUsd.toFixed(0)}</td>
+                </tr>
+                <tr>
+                  <th>WQ-affected value</th>
+                  <td>${insurance.wqAffectedValueUsd.toFixed(0)}</td>
+                </tr>
+                <tr>
+                  <th>Covered value</th>
+                  <td>${insurance.coveredValueUsd.toFixed(0)}</td>
+                </tr>
+                <tr>
+                  <th>Payout rate</th>
+                  <td>{(insurance.payoutRate * 100).toFixed(1)}%</td>
+                </tr>
+                <tr>
+                  <th>Historical P(trigger)</th>
+                  <td>{(insurance.historicalTriggerProbability * 100).toFixed(1)}%</td>
+                </tr>
+                <tr>
+                  <th>Expected payout</th>
+                  <td>${insurance.expectedPayout.toFixed(0)}</td>
+                </tr>
+                <tr>
+                  <th>Indicative premium</th>
+                  <td>${insurance.premiumIndicative.toFixed(0)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="card panel">
+          <h3>Credit model</h3>
+          <div className="muted">Risk-adjusted credit profile</div>
+          <div className="tableWrap" style={{ marginTop: 12 }}>
+            <table>
+              <tbody>
+                <tr>
+                  <th>Score</th>
+                  <td>{credit.score.toFixed(0)}</td>
+                </tr>
+                <tr>
+                  <th>Tier</th>
+                  <td>{credit.tier}</td>
+                </tr>
+                <tr>
+                  <th>PD</th>
+                  <td>{(credit.pd * 100).toFixed(1)}%</td>
+                </tr>
+                <tr>
+                  <th>LGD</th>
+                  <td>{(credit.lgd * 100).toFixed(1)}%</td>
+                </tr>
+                <tr>
+                  <th>ECL</th>
+                  <td>${credit.ecl.toFixed(0)}</td>
+                </tr>
+                <tr>
+                  <th>DSCR proxy</th>
+                  <td>{credit.dscrProxy.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <th>Leverage proxy</th>
+                  <td>{credit.leverageProxy.toFixed(2)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="card panel">
+          <h3>Monte Carlo</h3>
+          <div className="muted">Semi-empirical simulation from historical residuals</div>
+          <div className="tableWrap" style={{ marginTop: 12 }}>
+            <table>
+              <tbody>
+                <tr>
+                  <th>Cycles</th>
+                  <td>{mc.cycles}</td>
+                </tr>
+                <tr>
+                  <th>Trigger probability</th>
+                  <td>{(mc.triggerProbability * 100).toFixed(1)}%</td>
+                </tr>
+                <tr>
+                  <th>Average payout if triggered</th>
+                  <td>${mc.avgPayoutIfTriggered.toFixed(0)}</td>
+                </tr>
+                <tr>
+                  <th>Expected loss</th>
+                  <td>${mc.expectedLoss.toFixed(0)}</td>
+                </tr>
+                <tr>
+                  <th>Mean biomass</th>
+                  <td>{mc.meanBiomassKg.toFixed(0)} kg</td>
+                </tr>
+                <tr>
+                  <th>Biomass P10</th>
+                  <td>{mc.biomassP10.toFixed(0)} kg</td>
+                </tr>
+                <tr>
+                  <th>Biomass P50</th>
+                  <td>{mc.biomassP50.toFixed(0)} kg</td>
+                </tr>
+                <tr>
+                  <th>Biomass P90</th>
+                  <td>{mc.biomassP90.toFixed(0)} kg</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
