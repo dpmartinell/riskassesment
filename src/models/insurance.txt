@@ -1,0 +1,145 @@
+import { clamp } from "./utils";
+import { boundedProbabilityBand, uncertaintyBandFromData } from "./bayes";
+
+export type InsuranceInputs = {
+  riskIndex: number;
+  hotspotFraction: number;
+  capitalExposureUsd: number;
+  insuredAmountUsd: number;
+  historicalRows: {
+    annual_risk: number;
+    acute_fraction: number;
+  }[];
+};
+
+export type InsuranceResult = {
+  triggerRisk: number;
+  triggerHotspot: number;
+  coveredValueUsd: number;
+  payoutRate: number;
+  triggeredNow: boolean;
+  historicalTriggerProbability: number;
+  triggerProbabilityBand: {
+    mean: number;
+    low: number;
+    high: number;
+    relativeHalfWidth: number;
+  };
+  payoutIfTriggered: number;
+  expectedPayout: number;
+  premiumIndicative: number;
+  payoutBand: {
+    mean: number;
+    low: number;
+    high: number;
+    relativeHalfWidth: number;
+  };
+};
+
+export function triggerProbability(
+  historicalRows: { annual_risk: number; acute_fraction: number }[],
+  triggerRisk: number,
+  triggerHotspot: number
+){
+  if(!historicalRows.length) return 0;
+
+  const hits = historicalRows.filter(
+    row =>
+      row.annual_risk >= triggerRisk ||
+      row.acute_fraction >= triggerHotspot
+  ).length;
+
+  return hits / historicalRows.length;
+}
+
+export function payoutRateFromRisk(riskIndex:number){
+  return clamp(0.35 + riskIndex * 0.25, 0.30, 0.80);
+}
+
+export function coveredValue(capitalExposureUsd:number, insuredAmountUsd:number){
+  return Math.min(
+    insuredAmountUsd,
+    capitalExposureUsd * 0.90
+  );
+}
+
+export function payoutIfTriggered(
+  coveredValueUsd:number,
+  payoutRate:number
+){
+  return coveredValueUsd * payoutRate;
+}
+
+export function expectedPayout(
+  triggerProbability:number,
+  payoutIfTriggeredValue:number
+){
+  return triggerProbability * payoutIfTriggeredValue;
+}
+
+export function indicativePremium(
+  expectedLoss:number,
+  riskLoad = 0.30,
+  adminLoad = 0.10,
+  margin = 0.10
+){
+  return expectedLoss * (1 + riskLoad + adminLoad + margin);
+}
+
+export function buildInsuranceModel(inputs: InsuranceInputs): InsuranceResult {
+  const triggerRisk = 0.67;
+  const triggerHotspot = 0.26;
+
+  const coveredValueUsd = coveredValue(
+    inputs.capitalExposureUsd,
+    inputs.insuredAmountUsd
+  );
+
+  const payoutRate = payoutRateFromRisk(inputs.riskIndex);
+
+  const triggeredNow =
+    inputs.riskIndex >= triggerRisk ||
+    inputs.hotspotFraction >= triggerHotspot;
+
+  const historicalTriggerProbability = triggerProbability(
+    inputs.historicalRows,
+    triggerRisk,
+    triggerHotspot
+  );
+
+  const probabilityBand = boundedProbabilityBand(
+    historicalTriggerProbability,
+    inputs.historicalRows.length || 1
+  );
+
+  const payoutTriggered = payoutIfTriggered(
+    coveredValueUsd,
+    payoutRate
+  );
+
+  const expected = expectedPayout(
+    historicalTriggerProbability,
+    payoutTriggered
+  );
+
+  const premium = indicativePremium(expected);
+
+  const payoutBand = uncertaintyBandFromData(
+    expected,
+    inputs.historicalRows.length || 1
+  );
+
+  return {
+    triggerRisk,
+    triggerHotspot,
+    coveredValueUsd,
+    payoutRate,
+    triggeredNow,
+    historicalTriggerProbability,
+    triggerProbabilityBand: probabilityBand,
+    payoutIfTriggered: payoutTriggered,
+    expectedPayout: expected,
+    premiumIndicative: premium,
+    payoutBand
+  };
+}
